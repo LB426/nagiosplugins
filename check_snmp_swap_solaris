@@ -1,0 +1,189 @@
+#!/bin/bash
+
+# check_snmp_swap_solaris
+# Description : Checks Virtual Memory in Use and rate of swapping
+# (memory pressure) on Solaris operation system
+# Version : 1.0
+
+# Commands
+CMD_BASENAME="/bin/basename"
+CMD_SNMPGET="/usr/bin/snmpget"
+CMD_SNMPWALK="/usr/bin/snmpwalk"
+CMD_AWK="/bin/awk"
+CMD_GREP="/bin/grep"
+CMD_BC="/usr/bin/bc"
+CMD_EXPR="/usr/bin/expr"
+CMD_SED="/bin/sed"
+
+# Script name
+SCRIPTNAME=`$CMD_BASENAME $0`
+
+# Version
+VERSION="1.0"
+
+# Plugin return codes
+STATE_OK=0
+STATE_WARNING=1
+STATE_CRITICAL=2
+STATE_UNKNOWN=3
+
+# man swap:
+# List the status of all the swap areas. swap -l
+# path   -  The path name for the swap area
+# dev    -  The  major/minor device number in decimal if it is a block 
+#           special device; zeroes otherwise
+# swaplo -  The swaplow value for the area in 512-byte blocks.
+# blocks -  The swaplen value for the area in 512-byte blocks.
+# free   -  The number of 512-byte blocks in this area that are not
+#           currently allocated.
+# The list does not include swap space in the form of physical memory
+# because this space is not associated with a particular swap area.
+# If swap -l is run while swapname is in the process of being deleted
+# (by  swap-d), the string INDEL will appear in a sixth column of the
+# swap stats.
+OID_SWAP="NET-SNMP-EXTEND-MIB::nsExtendOutLine.\"swapusage\".2"
+
+BLOCKSIZE=512
+
+# Default variables
+DESCRIPTION="Unknown"
+STATE=$STATE_UNKNOWN
+
+# Default options
+COMMUNITY="public"
+HOSTNAME="127.0.0.1"
+WARNING=0
+CRITICAL=0
+
+# Option processing
+print_usage() {
+  echo "Usage: ./check_snmp_memory -H 127.0.0.1 -C public -w 80 -c 90"
+  echo "  $SCRIPTNAME -H ADDRESS"
+  echo "  $SCRIPTNAME -C STRING"
+  echo "  $SCRIPTNAME -w INTEGER"
+  echo "  $SCRIPTNAME -c INTEGER"
+  echo "  $SCRIPTNAME -h"
+  echo "  $SCRIPTNAME -V"
+}
+
+print_version() {
+  echo $SCRIPTNAME version $VERSION
+  echo ""
+  echo "This nagios plugins come with ABSOLUTELY NO WARRANTY."
+  echo "You may redistribute copies of the plugins under the terms of the GNU General Public License v2."
+}
+
+print_help() {
+  print_version
+  echo ""
+  print_usage
+  echo ""
+  echo "Checks memory and swap usage on Windows or Linux Server"
+  echo ""
+  echo "-H ADDRESS"
+  echo "   Name or IP address of host (default: 127.0.0.1)"
+  echo "-C STRING"
+  echo "   Community name for the host's SNMP agent (default: public)"
+  echo "-w INTEGER"
+  echo "   Warning level for memory usage in percent (default: 0)"
+  echo "-c INTEGER"
+  echo "   Critical level for memory usage in percent (default: 0)"
+  echo "-h"
+  echo "   Print this help screen"
+  echo "-V"
+  echo "   Print version and license information"
+  echo ""
+  echo ""
+  echo "This plugin uses the 'snmpget' command included with the NET-SNMP package."
+  echo "This plugin support performance data output."
+  echo "If the percentage of the warning and critical levels are set to 0, then the script returns a OK state."
+}
+
+while getopts H:C:w:c:hV OPT
+do
+  case $OPT in
+    H) HOSTNAME="$OPTARG" ;;
+    C) COMMUNITY="$OPTARG" ;;
+    w) WARNING=$OPTARG ;;
+    c) CRITICAL=$OPTARG ;;
+    h)
+      print_help
+      exit $STATE_UNKNOWN
+      ;;
+    V)
+      print_version
+      exit $STATE_UNKNOWN
+      ;;
+   esac
+done
+
+# Plugin processing
+size_convert() {
+  if [ $VALUE -ge 1073741824 ]; then
+    VALUE=`echo "scale=2 ; ( ( $VALUE / 1024 ) / 1024 ) / 1024" | $CMD_BC`
+    VALUE="$VALUE GB"
+  elif [ $VALUE -ge 1048576 ]; then
+    VALUE=`echo "scale=2 ; ( $VALUE / 1024 ) / 1024" | $CMD_BC`
+    VALUE="$VALUE MB"
+  elif [ $VALUE -ge 1024 ]; then
+    VALUE=`echo "scale=2 ; $VALUE / 1024" | $CMD_BC`
+    VALUE="$VALUE KB"
+  else
+    VALUE="$VALUE Octets"
+  fi
+}
+
+SNMPGETLINE=`$CMD_SNMPGET -t 2 -r 2 -v 2c -c $COMMUNITY -OvqU $HOSTNAME ${OID_SWAP}`
+SWAP_TOTAL_BLOCKS=`echo $SNMPGETLINE | $CMD_AWK '{ print $4}'`
+SWAP_TOTAL_BYTES=`$CMD_EXPR \( $SWAP_TOTAL_BLOCKS \* $BLOCKSIZE \)`
+VALUE=$SWAP_TOTAL_BYTES
+size_convert
+SWAP_TOTAL_FORMAT=$VALUE
+SWAP_TOTAL_POURCENT=100
+
+SWAP_FREE_BLOCKS=`echo $SNMPGETLINE | $CMD_AWK '{ print $5}'`
+SWAP_FREE_BYTES=`$CMD_EXPR \( $SWAP_FREE_BLOCKS \* $BLOCKSIZE \)`
+VALUE=$SWAP_FREE_BYTES
+size_convert
+SWAP_FREE_FORMAT=$VALUE
+SWAP_FREE_POURCENT=`$CMD_EXPR \( $SWAP_FREE_BLOCKS \* $SWAP_TOTAL_POURCENT \) / $SWAP_TOTAL_BLOCKS`
+
+
+SWAP_USED_BLOCKS=`$CMD_EXPR \( $SWAP_TOTAL_BLOCKS - $SWAP_FREE_BLOCKS \)`
+SWAP_USED_BYTES=`$CMD_EXPR \( $SWAP_TOTAL_BYTES - $SWAP_FREE_BYTES \)`
+VALUE=$SWAP_USED_BYTES
+size_convert
+SWAP_USED_FORMAT=$VALUE
+SWAP_USED_POURCENT=`$CMD_EXPR \( $SWAP_TOTAL_POURCENT - $SWAP_FREE_POURCENT \)`
+
+#echo SWAP_SIZE $SWAP_TOTAL_BLOCKS $SWAP_TOTAL_BYTES $SWAP_TOTAL_FORMAT $SWAP_TOTAL_POURCENT%
+#echo SWAP_FREE $SWAP_FREE_BLOCKS $SWAP_FREE_BYTES $SWAP_FREE_FORMAT $SWAP_FREE_POURCENT%
+#echo SWAP_USED $SWAP_USED_BLOCKS $SWAP_USED_BYTES $SWAP_USED_FORMAT $SWAP_USED_POURCENT%
+
+if [ $WARNING != 0 ] || [ $CRITICAL != 0 ]; then
+  PERFDATA_WARNING=`$CMD_EXPR \( $SWAP_TOTAL_POURCENT \* $WARNING \) / 100`
+  PERFDATA_CRITICAL=`$CMD_EXPR \( $SWAP_TOTAL_POURCENT \* $CRITICAL \) / 100`
+
+  if [ $SWAP_USED_POURCENT -gt $CRITICAL ] && [ $CRITICAL != 0 ]; then
+	STATE=$STATE_CRITICAL
+  elif [ $SWAP_USED_POURCENT -gt $WARNING ] && [ $WARNING != 0 ]; then
+	STATE=$STATE_WARNING
+  else
+	STATE=$STATE_OK
+  fi
+
+else
+  STATE=$STATE_OK
+fi
+
+DESCRIPTION="Virtual Memory (swap) in use : $SWAP_USED_FORMAT (${SWAP_USED_POURCENT}%). Amount of virtual memory that is free ${SWAP_FREE_POURCENT}%"
+
+MIN=0
+MAX=$SWAP_TOTAL_POURCENT
+
+PERFDATA1="swap_used_pourcent=${SWAP_USED_POURCENT}%;$PERFDATA_WARNING;$PERFDATA_CRITICAL;$MIN;$MAX"
+PERFDATA2="swap_user_bytes=${SWAP_USED_BYTES}B;0;$SWAP_TOTAL_BYTES;0;$SWAP_TOTAL_BYTES"
+OUTPUT="${DESCRIPTION}| ${PERFDATA1} ${PERFDATA2}"
+
+echo $OUTPUT
+exit $STATE
