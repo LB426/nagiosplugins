@@ -13,6 +13,7 @@ CMD_GREP="/bin/grep"
 CMD_BC="/usr/bin/bc"
 CMD_EXPR="/usr/bin/expr"
 CMD_SED="/bin/sed"
+CMD_CAT="/bin/cat"
 
 # Script name
 SCRIPTNAME=`$CMD_BASENAME $0`

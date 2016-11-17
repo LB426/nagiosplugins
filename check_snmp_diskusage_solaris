@@ -1,0 +1,149 @@
+#!/bin/bash
+
+# check_snmp_diskusage_solaris
+# Description : Checks disk usage on Solaris OS
+# Version : 1.0
+
+# Commands
+CMD_BASENAME="/bin/basename"
+CMD_SNMPGET="/usr/bin/snmpget"
+CMD_SNMPWALK="/usr/bin/snmpwalk"
+CMD_AWK="/bin/awk"
+CMD_GREP="/bin/grep"
+CMD_BC="/usr/bin/bc"
+CMD_EXPR="/usr/bin/expr"
+CMD_SED="/bin/sed"
+CMD_CAT="/bin/cat"
+
+# Script name
+SCRIPTNAME=`$CMD_BASENAME $0`
+
+# Version
+VERSION="1.0"
+
+# Plugin return codes
+STATE_OK=0
+STATE_WARNING=1
+STATE_CRITICAL=2
+STATE_UNKNOWN=3
+
+# на целевой системе добавить в snmpd.conf extend diskusage /usr/bin/iostat -xndl8
+# последняя цифра означает количество дисков. на неё буду опираться чтобы найти все диски в системе
+# 
+
+OID_NUMBER_OF_DISKS="NET-SNMP-EXTEND-MIB::nsExtendArgs.\"diskusage\""
+
+# Default variables
+DESCRIPTION="Unknown"
+STATE=$STATE_UNKNOWN
+
+# Default options
+COMMUNITY="public"
+HOSTNAME="127.0.0.1"
+WARNING=0
+CRITICAL=0
+
+# Option processing
+print_usage() {
+  echo "Usage: ./check_snmp_memory -H 127.0.0.1 -C public -w 80 -c 90"
+  echo "  $SCRIPTNAME -H ADDRESS"
+  echo "  $SCRIPTNAME -C STRING"
+  echo "  $SCRIPTNAME -w INTEGER"
+  echo "  $SCRIPTNAME -c INTEGER"
+  echo "  $SCRIPTNAME -h"
+  echo "  $SCRIPTNAME -V"
+}
+
+print_version() {
+  echo $SCRIPTNAME version $VERSION
+  echo ""
+  echo "This nagios plugins come with ABSOLUTELY NO WARRANTY."
+  echo "You may redistribute copies of the plugins under the terms of the GNU General Public License v2."
+}
+
+print_help() {
+  print_version
+  echo ""
+  print_usage
+  echo ""
+  echo "Checks memory and swap usage on Windows or Linux Server"
+  echo ""
+  echo "-H ADDRESS"
+  echo "   Name or IP address of host (default: 127.0.0.1)"
+  echo "-C STRING"
+  echo "   Community name for the host's SNMP agent (default: public)"
+  echo "-w INTEGER"
+  echo "   Warning level for memory usage in percent (default: 0)"
+  echo "-c INTEGER"
+  echo "   Critical level for memory usage in percent (default: 0)"
+  echo "-h"
+  echo "   Print this help screen"
+  echo "-V"
+  echo "   Print version and license information"
+  echo ""
+  echo ""
+  echo "This plugin uses the 'snmpget' command included with the NET-SNMP package."
+  echo "This plugin support performance data output."
+  echo "If the percentage of the warning and critical levels are set to 0, then the script returns a OK state."
+}
+
+while getopts H:C:w:c:hV OPT
+do
+  case $OPT in
+    H) HOSTNAME="$OPTARG" ;;
+    C) COMMUNITY="$OPTARG" ;;
+    w) WARNING=$OPTARG ;;
+    c) CRITICAL=$OPTARG ;;
+    h)
+      print_help
+      exit $STATE_UNKNOWN
+      ;;
+    V)
+      print_version
+      exit $STATE_UNKNOWN
+      ;;
+   esac
+done
+
+# Plugin processing
+size_convert() {
+  if [ $VALUE -ge 1073741824 ]; then
+    VALUE=`echo "scale=2 ; ( ( $VALUE / 1024 ) / 1024 ) / 1024" | $CMD_BC`
+    VALUE="$VALUE GB"
+  elif [ $VALUE -ge 1048576 ]; then
+    VALUE=`echo "scale=2 ; ( $VALUE / 1024 ) / 1024" | $CMD_BC`
+    VALUE="$VALUE MB"
+  elif [ $VALUE -ge 1024 ]; then
+    VALUE=`echo "scale=2 ; $VALUE / 1024" | $CMD_BC`
+    VALUE="$VALUE KB"
+  else
+    VALUE="$VALUE Octets"
+  fi
+}
+
+SNMPGETLINE=`$CMD_SNMPGET -t 2 -r 2 -v 2c -c $COMMUNITY -OvqU $HOSTNAME ${OID_NUMBER_OF_DISKS}`
+NUMBER_OF_DISKS=`echo $SNMPGETLINE | $CMD_SED 's/-xndl//'`
+
+LAST_LINE_NUMBER=`$CMD_EXPR \( $NUMBER_OF_DISKS \+ 2 \)`
+for (( i = 3 ; i <= $LAST_LINE_NUMBER ; i++))
+do 
+	SNMPGETLINE=`$CMD_SNMPGET -t 2 -r 2 -v 2c -c $COMMUNITY -OvqU $HOSTNAME NET-SNMP-EXTEND-MIB::nsExtendOutLine.\"diskusage\".$i`
+	# echo $SNMPGETLINE
+	# kilobytes read per second
+	KRPS=`echo $SNMPGETLINE | $CMD_AWK '{print $3}'`
+	# kilobytes written per second
+	KWPS=`echo $SNMPGETLINE | $CMD_AWK '{print $4}'`
+	# disk name
+	DISK=`echo $SNMPGETLINE | $CMD_AWK '{print $11}'`
+	#echo $DISK KRPS=$KRPS KWPS=$KWPS
+	PERFDATA="$PERFDATA '${DISK} kr/s'=$KRPS '${DISK} kw/s'=$KWPS "
+done
+
+STATE=$STATE_OK
+
+DESCRIPTION="Disk I/O usage"
+
+OUTPUT="${DESCRIPTION}| ${PERFDATA}"
+
+echo $OUTPUT
+exit $STATE

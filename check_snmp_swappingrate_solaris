@@ -40,10 +40,6 @@ OID_PAGES_PAGED_IN="NET-SNMP-EXTEND-MIB::nsExtendOutLine.\"swappingrate\".8"
 OID_PAGES_PAGED_OUT="NET-SNMP-EXTEND-MIB::nsExtendOutLine.\"swappingrate\".9"
 OID_PAGES_EXAMINED_CLOCK_DAEMON="NET-SNMP-EXTEND-MIB::nsExtendOutLine.\"swappingrate\".17"
 
-FILE_PREV_PAGES_PAGED_IN=/tmp/check_snmp_swappingrate_solaris_ppi
-FILE_PREV_PAGES_PAGED_OUT=/tmp/check_snmp_swappingrate_solaris_ppo
-FILE_PREV_PAGES_EXAM_CLKD=/tmp/check_snmp_swappingrate_solaris_pecd
-
 # Default variables
 DESCRIPTION="Unknown"
 STATE=$STATE_UNKNOWN
@@ -131,6 +127,10 @@ size_convert() {
     VALUE="$VALUE Pages"
   fi
 }
+
+FILE_PREV_PAGES_PAGED_IN=/tmp/check_snmp_swappingrate_solaris_ppi$HOSTNAME
+FILE_PREV_PAGES_PAGED_OUT=/tmp/check_snmp_swappingrate_solaris_ppo$HOSTNAME
+FILE_PREV_PAGES_EXAM_CLKD=/tmp/check_snmp_swappingrate_solaris_pecd$HOSTNAME
 
 if [ -f $FILE_PREV_PAGES_PAGED_IN ]; then
 	PREV_PAGES_PAGED_IN=`$CMD_CAT $FILE_PREV_PAGES_PAGED_IN`
