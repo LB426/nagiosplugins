@@ -1,0 +1,168 @@
+#!/bin/bash
+
+# check_snmp_nettrafonlinks
+# Description : Gathering Statistics About Network Traffic on Links
+# Version : 1.0
+
+# Commands
+CMD_BASENAME="/bin/basename"
+CMD_SNMPGET="/usr/bin/snmpget"
+CMD_SNMPWALK="/usr/bin/snmpwalk"
+CMD_AWK="/bin/awk"
+CMD_GREP="/bin/grep"
+CMD_BC="/usr/bin/bc"
+CMD_EXPR="/usr/bin/expr"
+CMD_SED="/bin/sed"
+CMD_CAT="/bin/cat"
+
+# Script name
+SCRIPTNAME=`$CMD_BASENAME $0`
+
+# Version
+VERSION="1.0"
+
+# Plugin return codes
+STATE_OK=0
+STATE_WARNING=1
+STATE_CRITICAL=2
+STATE_UNKNOWN=3
+
+# используется только IF-MIB::interfaces поэтому нет привязки к OS 
+
+# Default variables
+DESCRIPTION="Unknown"
+STATE=$STATE_UNKNOWN
+
+# Default options
+COMMUNITY="public"
+HOSTNAME="127.0.0.1"
+WARNING=0
+CRITICAL=0
+
+# Option processing
+print_usage() {
+  echo "Usage: ./check_snmp_memory -H 127.0.0.1 -C public -w 80 -c 90"
+  echo "  $SCRIPTNAME -H ADDRESS"
+  echo "  $SCRIPTNAME -C STRING"
+  echo "  $SCRIPTNAME -w INTEGER"
+  echo "  $SCRIPTNAME -c INTEGER"
+  echo "  $SCRIPTNAME -h"
+  echo "  $SCRIPTNAME -V"
+}
+
+print_version() {
+  echo $SCRIPTNAME version $VERSION
+  echo ""
+  echo "This nagios plugins come with ABSOLUTELY NO WARRANTY."
+  echo "You may redistribute copies of the plugins under the terms of the GNU General Public License v2."
+}
+
+print_help() {
+  print_version
+  echo ""
+  print_usage
+  echo ""
+  echo "Checks memory and swap usage on Windows or Linux Server"
+  echo ""
+  echo "-H ADDRESS"
+  echo "   Name or IP address of host (default: 127.0.0.1)"
+  echo "-C STRING"
+  echo "   Community name for the host's SNMP agent (default: public)"
+  echo "-w INTEGER"
+  echo "   Warning level for memory usage in percent (default: 0)"
+  echo "-c INTEGER"
+  echo "   Critical level for memory usage in percent (default: 0)"
+  echo "-h"
+  echo "   Print this help screen"
+  echo "-V"
+  echo "   Print version and license information"
+  echo ""
+  echo ""
+  echo "This plugin uses the 'snmpget' command included with the NET-SNMP package."
+  echo "This plugin support performance data output."
+  echo "If the percentage of the warning and critical levels are set to 0, then the script returns a OK state."
+}
+
+while getopts H:C:w:c:hV OPT
+do
+  case $OPT in
+    H) HOSTNAME="$OPTARG" ;;
+    C) COMMUNITY="$OPTARG" ;;
+    w) WARNING=$OPTARG ;;
+    c) CRITICAL=$OPTARG ;;
+    h)
+      print_help
+      exit $STATE_UNKNOWN
+      ;;
+    V)
+      print_version
+      exit $STATE_UNKNOWN
+      ;;
+   esac
+done
+
+# Plugin processing
+size_convert() {
+  if [ $VALUE -ge 1073741824 ]; then
+    VALUE=`echo "scale=2 ; ( ( $VALUE / 1024 ) / 1024 ) / 1024" | $CMD_BC`
+    VALUE="$VALUE GB"
+  elif [ $VALUE -ge 1048576 ]; then
+    VALUE=`echo "scale=2 ; ( $VALUE / 1024 ) / 1024" | $CMD_BC`
+    VALUE="$VALUE MB"
+  elif [ $VALUE -ge 1024 ]; then
+    VALUE=`echo "scale=2 ; $VALUE / 1024" | $CMD_BC`
+    VALUE="$VALUE KB"
+  else
+    VALUE="$VALUE Octets"
+  fi
+}
+
+
+NUMBER_OF_IFS=`$CMD_SNMPGET -t 2 -r 2 -v 2c -c $COMMUNITY -OvqU $HOSTNAME IF-MIB::ifNumber.0`
+
+for (( i = 1 ; i <= $NUMBER_OF_IFS ; i++))
+do 
+	IFNAME=`$CMD_SNMPGET -t 2 -r 2 -v 2c -c $COMMUNITY -OvqU $HOSTNAME IF-MIB::ifName.$i`
+	if [ "$IFNAME" != "No Such Instance currently exists at this OID" ]; then
+		OCTETS_IN=`$CMD_SNMPGET -t 2 -r 2 -v 2c -c $COMMUNITY -OvqU $HOSTNAME IF-MIB::ifHCInOctets.$i`
+		OCTETS_OUT=`$CMD_SNMPGET -t 2 -r 2 -v 2c -c $COMMUNITY -OvqU $HOSTNAME IF-MIB::ifHCOutOctets.$i`
+		MTU=`$CMD_SNMPGET -t 2 -r 2 -v 2c -c $COMMUNITY -OvqU $HOSTNAME IF-MIB::ifMtu.$i`
+		IN_B=`$CMD_EXPR \( $OCTETS_IN \* $MTU \)`
+		OUT_B=`$CMD_EXPR \( $OCTETS_OUT \* $MTU \)`
+
+		FILE_TRAFF_IN_BYTES=/tmp/check_snmp_nettrafonlink_in_${IFNAME}_$HOSTNAME
+		FILE_TRAFF_OUT_BYTES=/tmp/check_snmp_nettrafonlink_out_${IFNAME}_$HOSTNAME
+
+		if [ -f $FILE_TRAFF_IN_BYTES ]; then
+			PREV_IN_B=`$CMD_CAT $FILE_TRAFF_IN_BYTES`
+		else
+			PREV_IN_B=0
+		fi
+		if [ -f $FILE_TRAFF_OUT_BYTES ]; then
+			PREV_OUT_B=`$CMD_CAT $FILE_TRAFF_OUT_BYTES`
+		else
+			PREV_OUT_B=0
+		fi
+
+		echo $IN_B > $FILE_TRAFF_IN_BYTES
+		echo $OUT_B > $FILE_TRAFF_OUT_BYTES
+		
+		DIFF_IN_KB=`$CMD_EXPR \( \( $IN_B \- $PREV_IN_B \) \/ 1024 \)`
+		DIFF_OUT_KB=`$CMD_EXPR \( \( $OUT_B \- $PREV_OUT_B \) \/ 1024 \)`
+
+		#echo $IFNAME in=$OCTETS_IN in_B=$IN_B out=$OCTETS_OUT out_B=$OUT_B mtu=$MTU
+		IFNAMES="$IFNAMES $IFNAME"
+		PERFDATA="$PERFDATA ${IFNAME}_in=${DIFF_IN_KB}KB ${IFNAME}_out=${DIFF_OUT_KB}KB "
+	else
+		echo no interface with index $i
+	fi
+done
+
+STATE=$STATE_OK
+
+DESCRIPTION="Network I/O usage on interfaces $IFNAMES"
+
+OUTPUT="${DESCRIPTION}| ${PERFDATA}"
+
+echo $OUTPUT
+exit $STATE
