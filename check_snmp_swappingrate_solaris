@@ -1,0 +1,219 @@
+#!/bin/bash
+
+# check_snmp_swappingrate_solaris
+# Description : Checks the rate of swapping (memory pressure) on Solaris OS
+# Version : 1.0
+
+# Commands
+CMD_BASENAME="/bin/basename"
+CMD_SNMPGET="/usr/bin/snmpget"
+CMD_SNMPWALK="/usr/bin/snmpwalk"
+CMD_AWK="/bin/awk"
+CMD_GREP="/bin/grep"
+CMD_BC="/usr/bin/bc"
+CMD_EXPR="/usr/bin/expr"
+CMD_SED="/bin/sed"
+CMD_CAT="/bin/cat"
+
+# Script name
+SCRIPTNAME=`$CMD_BASENAME $0`
+
+# Version
+VERSION="1.0"
+
+# Plugin return codes
+STATE_OK=0
+STATE_WARNING=1
+STATE_CRITICAL=2
+STATE_UNKNOWN=3
+
+PAGESIZE=4096
+
+# Monitoring the rate of swapping, or memory pressure.
+# Solaris preserves a distinction between swapping 
+# (moving all memory for a process out to virtual memory) 
+# and paging (swapping out least used pages, instead of entire processes).
+# These activities can be viewed with vmstat -s
+# best article - https://www.logicmonitor.com/blog/2014/08/12/why-youre-monitoring-solaris-virtual-memory-wrong/
+
+OID_PAGES_PAGED_IN="NET-SNMP-EXTEND-MIB::nsExtendOutLine.\"swappingrate\".8"
+OID_PAGES_PAGED_OUT="NET-SNMP-EXTEND-MIB::nsExtendOutLine.\"swappingrate\".9"
+OID_PAGES_EXAMINED_CLOCK_DAEMON="NET-SNMP-EXTEND-MIB::nsExtendOutLine.\"swappingrate\".17"
+
+FILE_PREV_PAGES_PAGED_IN=/tmp/check_snmp_swappingrate_solaris_ppi
+FILE_PREV_PAGES_PAGED_OUT=/tmp/check_snmp_swappingrate_solaris_ppo
+FILE_PREV_PAGES_EXAM_CLKD=/tmp/check_snmp_swappingrate_solaris_pecd
+
+# Default variables
+DESCRIPTION="Unknown"
+STATE=$STATE_UNKNOWN
+
+# Default options
+COMMUNITY="public"
+HOSTNAME="127.0.0.1"
+WARNING=0
+CRITICAL=0
+
+# Option processing
+print_usage() {
+  echo "Usage: ./check_snmp_memory -H 127.0.0.1 -C public -w 80 -c 90"
+  echo "  $SCRIPTNAME -H ADDRESS"
+  echo "  $SCRIPTNAME -C STRING"
+  echo "  $SCRIPTNAME -w INTEGER"
+  echo "  $SCRIPTNAME -c INTEGER"
+  echo "  $SCRIPTNAME -h"
+  echo "  $SCRIPTNAME -V"
+}
+
+print_version() {
+  echo $SCRIPTNAME version $VERSION
+  echo ""
+  echo "This nagios plugins come with ABSOLUTELY NO WARRANTY."
+  echo "You may redistribute copies of the plugins under the terms of the GNU General Public License v2."
+}
+
+print_help() {
+  print_version
+  echo ""
+  print_usage
+  echo ""
+  echo "Checks memory and swap usage on Windows or Linux Server"
+  echo ""
+  echo "-H ADDRESS"
+  echo "   Name or IP address of host (default: 127.0.0.1)"
+  echo "-C STRING"
+  echo "   Community name for the host's SNMP agent (default: public)"
+  echo "-w INTEGER"
+  echo "   Warning level for memory usage in percent (default: 0)"
+  echo "-c INTEGER"
+  echo "   Critical level for memory usage in percent (default: 0)"
+  echo "-h"
+  echo "   Print this help screen"
+  echo "-V"
+  echo "   Print version and license information"
+  echo ""
+  echo ""
+  echo "This plugin uses the 'snmpget' command included with the NET-SNMP package."
+  echo "This plugin support performance data output."
+  echo "If the percentage of the warning and critical levels are set to 0, then the script returns a OK state."
+}
+
+while getopts H:C:w:c:hV OPT
+do
+  case $OPT in
+    H) HOSTNAME="$OPTARG" ;;
+    C) COMMUNITY="$OPTARG" ;;
+    w) WARNING=$OPTARG ;;
+    c) CRITICAL=$OPTARG ;;
+    h)
+      print_help
+      exit $STATE_UNKNOWN
+      ;;
+    V)
+      print_version
+      exit $STATE_UNKNOWN
+      ;;
+   esac
+done
+
+# Plugin processing
+size_convert() {
+  if [ $VALUE -ge 1073741824 ]; then
+    VALUE=`echo "scale=2 ; ( ( $VALUE / 1024 ) / 1024 ) / 1024" | $CMD_BC`
+    VALUE="$VALUE GB"
+  elif [ $VALUE -ge 1048576 ]; then
+    VALUE=`echo "scale=2 ; ( $VALUE / 1024 ) / 1024" | $CMD_BC`
+    VALUE="$VALUE MB"
+  elif [ $VALUE -ge 1024 ]; then
+    VALUE=`echo "scale=2 ; $VALUE / 1024" | $CMD_BC`
+    VALUE="$VALUE KB"
+  else
+    VALUE="$VALUE Pages"
+  fi
+}
+
+if [ -f $FILE_PREV_PAGES_PAGED_IN ]; then
+	PREV_PAGES_PAGED_IN=`$CMD_CAT $FILE_PREV_PAGES_PAGED_IN`
+else
+	PREV_PAGES_PAGED_IN=0
+fi
+
+if [ -f $FILE_PREV_PAGES_PAGED_OUT ]; then
+	PREV_PAGES_PAGED_OUT=`$CMD_CAT $FILE_PREV_PAGES_PAGED_OUT`
+else
+	PREV_PAGES_PAGED_OUT=0
+fi
+
+if [ -f $FILE_PREV_PAGES_EXAM_CLKD ]; then
+	PREV_PAGES_EXAM_CLKD=`$CMD_CAT $FILE_PREV_PAGES_EXAM_CLKD`
+else
+	PREV_PAGES_EXAM_CLKD=0
+fi
+
+SNMPGETLINE=`$CMD_SNMPGET -t 2 -r 2 -v 2c -c $COMMUNITY -OvqU $HOSTNAME ${OID_PAGES_PAGED_IN}`
+PAGES_PAGED_IN=`echo $SNMPGETLINE | $CMD_AWK '{ print $1}'`
+PAGES_PAGED_IN_BYTES=`$CMD_EXPR \( $PAGES_PAGED_IN \* $PAGESIZE \)`
+VALUE=$PAGES_PAGED_IN_BYTES
+size_convert
+PAGES_PAGED_IN_FORMAT=$VALUE
+DIFF_PAGES_PAGED_IN=`$CMD_EXPR \( $PAGES_PAGED_IN \- $PREV_PAGES_PAGED_IN \)`
+echo $PAGES_PAGED_IN > $FILE_PREV_PAGES_PAGED_IN
+
+SNMPGETLINE=`$CMD_SNMPGET -t 2 -r 2 -v 2c -c $COMMUNITY -OvqU $HOSTNAME ${OID_PAGES_PAGED_OUT}`
+PAGES_PAGED_OUT=`echo $SNMPGETLINE | $CMD_AWK '{ print $1}'`
+PAGES_PAGED_OUT_BYTES=`$CMD_EXPR \( $PAGES_PAGED_OUT \* $PAGESIZE \)`
+VALUE=$PAGES_PAGED_OUT_BYTES
+size_convert
+PAGES_PAGED_OUT_FORMAT=$VALUE
+DIFF_PAGES_PAGED_OUT=`$CMD_EXPR \( $PAGES_PAGED_OUT \- $PREV_PAGES_PAGED_OUT \)`
+echo $PAGES_PAGED_OUT > $FILE_PREV_PAGES_PAGED_OUT
+
+SNMPGETLINE=`$CMD_SNMPGET -t 2 -r 2 -v 2c -c $COMMUNITY -OvqU $HOSTNAME ${OID_PAGES_EXAMINED_CLOCK_DAEMON}`
+PAGES_EXAM_CLKD=`echo $SNMPGETLINE | $CMD_AWK '{ print $1}'`
+PAGES_EXAM_CLKD_BYTES=`$CMD_EXPR \( $PAGES_EXAM_CLKD \* $PAGESIZE \)`
+VALUE=$PAGES_EXAM_CLKD_BYTES
+size_convert
+PAGES_EXAM_CLKD_FORMAT=$VALUE
+DIFF_PAGES_EXAM_CLKD=`$CMD_EXPR \( $PAGES_EXAM_CLKD \- $PREV_PAGES_EXAM_CLKD \)`
+VALUE=$DIFF_PAGES_EXAM_CLKD
+size_convert
+DIFF_PAGES_EXAM_CLKD_FORMAT=$VALUE
+echo $PAGES_EXAM_CLKD > $FILE_PREV_PAGES_EXAM_CLKD
+
+#echo PAGES_PAGED_IN  $PREV_PAGES_PAGED_IN $PAGES_PAGED_IN $DIFF_PAGES_PAGED_IN $PAGES_PAGED_IN_BYTES  $PAGES_PAGED_IN_FORMAT
+#echo PAGES_PAGED_OUT $PREV_PAGES_PAGED_OUT $PAGES_PAGED_OUT $DIFF_PAGES_PAGED_OUT $PAGES_PAGED_OUT_BYTES $PAGES_PAGED_OUT_FORMAT
+#echo PAGES_EXAM_CLKD $PREV_PAGES_EXAM_CLKD $PAGES_EXAM_CLKD $DIFF_PAGES_EXAM_CLKD $PAGES_EXAM_CLKD_BYTES $PAGES_EXAM_CLKD_FORMAT
+
+if [ $WARNING != 0 ] || [ $CRITICAL != 0 ]; then
+	PERFDATA_WARNING=$WARNING
+	PERFDATA_CRITICAL=$CRITICAL
+
+	# когда количество свободной памяти падает ниже порога, обычно 1/64 физической памяти
+	# запускается ядерный поток который начинает сканирование памяти.
+	# сканер страниц ищет страницы которые не использовались за последнее время и делает page out to the swap device
+	# чтобы таким образом освободить физическую память.
+	# если DIFF_PAGES_EXAM_CLKD - скорость сканирования страниц превышает пороги - то устанавливаем состояние.
+	if [ $DIFF_PAGES_EXAM_CLKD -gt $CRITICAL ] && [ $CRITICAL != 0 ]; then
+		STATE=$STATE_CRITICAL
+	elif [ $DIFF_PAGES_EXAM_CLKD -gt $WARNING ] && [ $WARNING != 0 ]; then
+		STATE=$STATE_WARNING
+	else
+		STATE=$STATE_OK
+	fi
+
+else
+	STATE=$STATE_OK
+fi
+
+DESCRIPTION="Swapping rate : $DIFF_PAGES_EXAM_CLKD_FORMAT"
+
+PERFDATA1="Pages_paged_IN=${DIFF_PAGES_PAGED_IN}"
+
+PERFDATA2="Pages_paged_OUT=${DIFF_PAGES_PAGED_OUT}"
+
+PERFDATA3="Pages_examined_by_the_clock_daemon=${DIFF_PAGES_EXAM_CLKD}"
+
+OUTPUT="${DESCRIPTION}| ${PERFDATA1} ${PERFDATA2} ${PERFDATA3}"
+
+echo $OUTPUT
+exit $STATE

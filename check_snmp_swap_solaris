@@ -1,8 +1,7 @@
 #!/bin/bash
 
 # check_snmp_swap_solaris
-# Description : Checks Virtual Memory in Use and rate of swapping
-# (memory pressure) on Solaris operation system
+# Description : Checks Virtual Memory in Use (swap) on Solaris OS
 # Version : 1.0
 
 # Commands
