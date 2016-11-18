@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# check_snmp_nettrafonlinks
-# Description : Gathering Statistics About Network Traffic on Links
+# check_snmp_trafonifs
+# Description : Gathering Statistics About Network Traffic on interfaces
 # Version : 1.0
 
 # Commands
@@ -124,35 +124,36 @@ for (( i = 1 ; i <= $NUMBER_OF_IFS ; i++))
 do 
 	IFNAME=`$CMD_SNMPGET -t 2 -r 2 -v 2c -c $COMMUNITY -OvqU $HOSTNAME IF-MIB::ifName.$i`
 	if [ "$IFNAME" != "No Such Instance currently exists at this OID" ]; then
-		OCTETS_IN=`$CMD_SNMPGET -t 2 -r 2 -v 2c -c $COMMUNITY -OvqU $HOSTNAME IF-MIB::ifHCInOctets.$i`
-		OCTETS_OUT=`$CMD_SNMPGET -t 2 -r 2 -v 2c -c $COMMUNITY -OvqU $HOSTNAME IF-MIB::ifHCOutOctets.$i`
-		MTU=`$CMD_SNMPGET -t 2 -r 2 -v 2c -c $COMMUNITY -OvqU $HOSTNAME IF-MIB::ifMtu.$i`
-		IN_B=`$CMD_EXPR \( $OCTETS_IN \* $MTU \)`
-		OUT_B=`$CMD_EXPR \( $OCTETS_OUT \* $MTU \)`
+		#if ! grep -q "lo" <<< $IFNAME ;then
+			OCTETS_IN=`$CMD_SNMPGET -t 2 -r 2 -v 2c -c $COMMUNITY -OvqU $HOSTNAME IF-MIB::ifHCInOctets.$i`
+			OCTETS_OUT=`$CMD_SNMPGET -t 2 -r 2 -v 2c -c $COMMUNITY -OvqU $HOSTNAME IF-MIB::ifHCOutOctets.$i`
+			MTU=`$CMD_SNMPGET -t 2 -r 2 -v 2c -c $COMMUNITY -OvqU $HOSTNAME IF-MIB::ifMtu.$i`
+			IN_B=$OCTETS_IN
+			OUT_B=$OCTETS_OUT
 
-		FILE_TRAFF_IN_BYTES=/tmp/check_snmp_nettrafonlink_in_${IFNAME}_$HOSTNAME
-		FILE_TRAFF_OUT_BYTES=/tmp/check_snmp_nettrafonlink_out_${IFNAME}_$HOSTNAME
+			FILE_TRAFF_IN_BYTES=/tmp/check_snmp_trafonifs_in_${IFNAME}_$HOSTNAME
+			FILE_TRAFF_OUT_BYTES=/tmp/check_snmp_trafonifs_out_${IFNAME}_$HOSTNAME
 
-		if [ -f $FILE_TRAFF_IN_BYTES ]; then
-			PREV_IN_B=`$CMD_CAT $FILE_TRAFF_IN_BYTES`
-		else
-			PREV_IN_B=0
-		fi
-		if [ -f $FILE_TRAFF_OUT_BYTES ]; then
-			PREV_OUT_B=`$CMD_CAT $FILE_TRAFF_OUT_BYTES`
-		else
-			PREV_OUT_B=0
-		fi
+			if [ -f $FILE_TRAFF_IN_BYTES ]; then
+				PREV_IN_B=`$CMD_CAT $FILE_TRAFF_IN_BYTES`
+			else
+				PREV_IN_B=0
+			fi
+			if [ -f $FILE_TRAFF_OUT_BYTES ]; then
+				PREV_OUT_B=`$CMD_CAT $FILE_TRAFF_OUT_BYTES`
+			else
+				PREV_OUT_B=0
+			fi
 
-		echo $IN_B > $FILE_TRAFF_IN_BYTES
-		echo $OUT_B > $FILE_TRAFF_OUT_BYTES
-		
-		DIFF_IN_KB=`$CMD_EXPR \( \( $IN_B \- $PREV_IN_B \) \/ 1024 \)`
-		DIFF_OUT_KB=`$CMD_EXPR \( \( $OUT_B \- $PREV_OUT_B \) \/ 1024 \)`
+			echo $IN_B > $FILE_TRAFF_IN_BYTES
+			echo $OUT_B > $FILE_TRAFF_OUT_BYTES
+			
+			DIFF_IN_KB=`$CMD_EXPR \( \( $IN_B \- $PREV_IN_B \) \/ 1024 \)`
+			DIFF_OUT_KB=`$CMD_EXPR \( \( $OUT_B \- $PREV_OUT_B \) \/ 1024 \)`
 
-		#echo $IFNAME in=$OCTETS_IN in_B=$IN_B out=$OCTETS_OUT out_B=$OUT_B mtu=$MTU
-		IFNAMES="$IFNAMES $IFNAME"
-		PERFDATA="$PERFDATA ${IFNAME}_in=${DIFF_IN_KB}KB ${IFNAME}_out=${DIFF_OUT_KB}KB "
+			IFNAMES="$IFNAMES $IFNAME"
+			PERFDATA="$PERFDATA ${IFNAME}_in=${DIFF_IN_KB}KB ${IFNAME}_out=${DIFF_OUT_KB}KB "
+		#fi
 	else
 		echo no interface with index $i
 	fi
