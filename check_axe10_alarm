@@ -14,6 +14,8 @@ CMD_SED="/bin/sed"
 CMD_CAT="/bin/cat"
 CMD_CURL="/usr/bin/curl"
 CMD_CUT="/bin/cut"
+CMD_TR="/bin/tr"
+CMD_ICONV="/bin/iconv"
 
 # Script name
 SCRIPTNAME=`$CMD_BASENAME $0`
@@ -116,12 +118,12 @@ size_convert() {
 
 # remove tmp files
 remove_tmp_files() {
-	if [ -f $FILE_AXE10_ALARM ]; then
-		rm -rf $FILE_AXE10_ALARM
-	fi
-	if [ -f $FILE_CURL_ERRORS ]; then
-		rm -rf $FILE_CURL_ERRORS
-	fi
+        if [ -f $FILE_AXE10_ALARM ]; then
+                rm -rf $FILE_AXE10_ALARM
+        fi
+        if [ -f $FILE_CURL_ERRORS ]; then
+                rm -rf $FILE_CURL_ERRORS
+        fi
 }
 
 FILE_AXE10_ALARM="/tmp/axe10_alarm_$HOST"
@@ -131,18 +133,27 @@ remove_tmp_files
 $CMD_CURL http://$HOST:8000/ -o $FILE_AXE10_ALARM 2>$FILE_CURL_ERRORS
 ERRORS=`$CMD_CAT $FILE_CURL_ERRORS | $CMD_GREP "couldn't connect to host"`
 if [[ "$ERRORS" == *"couldn't connect to host"* ]]; then
-	STATE=$STATE_CRITICAL
-	DESCRIPTION="couldn't connect to host"
+        STATE=$STATE_CRITICAL
+	DESCRIPTION="нет подключения к агенту"
 else
-	STATUSLINE=`$CMD_CAT $FILE_AXE10_ALARM`
-	STATE=`echo $STATUSLINE | $CMD_AWK -F\| '{print $1;}'`
-	ALARMS=`echo $STATUSLINE | $CMD_CUT -c 3- | $CMD_SED 's/|/; /g'`
-	DESCRIPTION="$ALARMS"
+	if [ -f $FILE_AXE10_ALARM ]; then
+		STATUSLINE=`$CMD_CAT $FILE_AXE10_ALARM`
+		STATUSLINE=`echo $STATUSLINE | $CMD_TR -d '\r'`
+		STATE=`echo $STATUSLINE | $CMD_AWK -F\| '{print $1;}'`
+		ALARMS=`echo $STATUSLINE | $CMD_CUT -c 3- | $CMD_SED 's/|/; /g'`
+		DESCRIPTION=`echo $ALARMS | $CMD_ICONV -f cp1251 -t utf8`
+		if [ -z "${DESCRIPTION}" ]; then
+			DESCRIPTION="no alarm"
+		fi
+	else
+		STATE=$STATE_CRITICAL
+		DESCRIPTION="нет подключения к агенту"
+	fi
 fi
 
 remove_tmp_files
 
-OUTPUT="AXE10 alarms: ${DESCRIPTION}"
+OUTPUT="ATS alarms: ${DESCRIPTION}"
 
 echo $OUTPUT
 exit $STATE
