@@ -37,6 +37,8 @@ STATE=$STATE_UNKNOWN
 HOST="127.0.0.1"
 WARNING=0
 CRITICAL=0
+ENCFROM="utf8"
+ENCTO="utf8"
 
 # Option processing
 print_usage() {
@@ -72,6 +74,11 @@ print_help() {
   echo "   Print this help screen"
   echo "-V"
   echo "   Print version and license information"
+  echo "-f"
+  echo "   Encoding: from, like iconv"
+  echo "-t"
+  echo "   Encoding: to, like iconv"
+  echo ""
   echo ""
   echo ""
   echo "This plugin uses the 'curl' command."
@@ -79,10 +86,12 @@ print_help() {
   echo "If the percentage of the warning and critical levels are set to 0, then the script returns a OK state."
 }
 
-while getopts H:w:c:hV OPT
+while getopts H:f:t:w:c:hV OPT
 do
   case $OPT in
     H) HOST="$OPTARG" ;;
+    f) ENCFROM=$OPTARG ;;
+    t) ENCTO=$OPTARG ;;
     w) WARNING=$OPTARG ;;
     c) CRITICAL=$OPTARG ;;
     h)
@@ -141,7 +150,7 @@ else
 		STATUSLINE=`echo $STATUSLINE | $CMD_TR -d '\r'`
 		STATE=`echo $STATUSLINE | $CMD_AWK -F\| '{print $1;}'`
 		ALARMS=`echo $STATUSLINE | $CMD_CUT -c 3- | $CMD_SED 's/|/; /g'`
-		DESCRIPTION=`echo $ALARMS | $CMD_ICONV -f cp1251 -t utf8`
+		DESCRIPTION=`echo $ALARMS | $CMD_ICONV -f $ENCFROM -t $ENCTO`
 		if [ -z "${DESCRIPTION}" ]; then
 			DESCRIPTION="no alarm"
 		fi
